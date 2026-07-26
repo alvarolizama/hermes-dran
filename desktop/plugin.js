@@ -4,7 +4,7 @@ import {
   ScrollArea, Skeleton, EmptyState, ErrorState
 } from '@hermes/plugin-sdk'
 import { jsx, jsxs, Fragment } from 'react/jsx-runtime'
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 // ── Config ──────────────────────────────────────────────────────────────
 
@@ -17,6 +17,21 @@ var REFRESH_MS = 30000
 function dranFetch(path) {
   return fetch(DRAN_URL + path, {
     headers: { Authorization: 'Bearer ' + DRAN_TOKEN }
+  }).then(function (r) {
+    if (!r.ok) throw new Error('Dran API error: ' + r.status)
+    return r.json()
+  })
+}
+
+// PUT with body — for status/archive/progress updates
+function dranPut(path, body) {
+  return fetch(DRAN_URL + path, {
+    method: 'PUT',
+    headers: {
+      'Authorization': 'Bearer ' + DRAN_TOKEN,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
   }).then(function (r) {
     if (!r.ok) throw new Error('Dran API error: ' + r.status)
     return r.json()
@@ -43,7 +58,6 @@ function dranPageUrl(type, slug) {
 
 // Open URL in dev browser pane
 function openInDevBrowser(url) {
-  // Emit a window CustomEvent that the dev browser plugin listens for
   window.dispatchEvent(new CustomEvent('hermes:dev-browser:new-tab', {
     detail: { url: url }
   }))
@@ -60,6 +74,29 @@ function priorityColor(priority) {
   if (priority === 'high') return 'text-orange-400'
   if (priority === 'medium') return 'text-yellow-400'
   return 'text-(--ui-text-quaternary)'
+}
+
+var PROJECT_STATUSES = ['draft', 'active', 'on_hold', 'done']
+var PLAN_STATUSES = ['draft', 'active', 'done']
+
+function statusColor(status) {
+  if (status === 'done') return 'text-green-400'
+  if (status === 'active') return 'text-blue-400'
+  if (status === 'on_hold') return 'text-yellow-400'
+  if (status === 'draft') return 'text-(--ui-text-quaternary)'
+  return 'text-(--ui-text-quaternary)'
+}
+
+// Normalize progress: API stores 0.0–1.0, UI shows 0–100
+function progressToPercent(val) {
+  if (val == null) return 0
+  var num = Number(val)
+  if (isNaN(num)) return 0
+  return num <= 1 ? Math.round(num * 100) : Math.round(num)
+}
+
+function percentToProgress(pct) {
+  return pct / 100
 }
 
 // ── Data hooks ──────────────────────────────────────────────────────────
@@ -80,27 +117,52 @@ function useDranTodos() {
   })
 }
 
+// ── Mutation helpers ────────────────────────────────────────────────────
+
+// Update a page's meta field — fetches current page, merges meta, sends PUT
+function updatePageMeta(slug, metaKey, metaValue) {
+  return dranFetch('/api/pages/' + encodeURIComponent(slug) + '?context=' + DRAN_CONTEXT)
+    .then(function (res) {
+      var page = res.data
+      var currentMeta = page.meta || {}
+      var newMeta = {}
+      newMeta[metaKey] = metaValue
+      // Merge: current meta + new field
+      var mergedMeta = Object.assign({}, currentMeta, newMeta)
+      return dranPut('/api/pages/' + encodeURIComponent(slug) + '?context=' + DRAN_CONTEXT, {
+        meta: mergedMeta
+      })
+    })
+}
+
+// Archive a page — PUT archived: true
+function archivePage(slug) {
+  return dranPut('/api/pages/' + encodeURIComponent(slug) + '?context=' + DRAN_CONTEXT, {
+    archived: true
+  })
+}
+
+function useDranPages(pageType) {
+  return useQuery({
+    queryKey: [ID, 'pages', pageType],
+    queryFn: function () { return dranFetch('/api/pages?type=' + pageType + '&context=' + DRAN_CONTEXT) },
+    refetchInterval: REFRESH_MS,
+  })
+}
+
 // ── Single chip ─────────────────────────────────────────────────────────
 
 function DranChip() {
   var open = useValue($modalOpen)
-  var { data, isLoading, error } = useDranIndex()
+  var goalQuery = useDranPages('goal')
 
-  var counts = { project: 0, goal: 0, plan: 0, todo: 0 }
-  if (data && data.data) {
-    data.data.forEach(function (p) {
-      if (p.archived) return  // skip archived
-      if (p.type === 'project') {
-        var st = p.status
-        if (st !== 'done' && st !== 'archived') counts.project++
-      } else if (p.type === 'goal') {
-        // skip goals with 100% progress
-        if (p.progress !== 100 && p.progress !== '100') counts.goal++
-      } else if (p.type === 'plan') {
-        var pst = p.status
-        if (pst !== 'done' && pst !== 'archived') counts.plan++
-      }
-    })
+  var goalCount = 0
+  if (goalQuery.data && goalQuery.data.data) {
+    goalCount = goalQuery.data.data.filter(function (g) {
+      if (g.archived) return false
+      var meta = g.meta || {}
+      return progressToPercent(meta.progress) !== 100
+    }).length
   }
 
   var activeTodos = 0
@@ -114,7 +176,7 @@ function DranChip() {
   }
 
   var todosDisplay = todoData.isLoading ? '…' : todoData.error ? '!' : activeTodos
-  var goalsDisplay = isLoading ? '…' : error ? '!' : counts.goal
+  var goalsDisplay = goalQuery.isLoading ? '…' : goalQuery.error ? '!' : goalCount
 
   function dotStyle(active) {
     return {
@@ -182,24 +244,32 @@ function DranModal() {
 
 function DranModalContent() {
   var [activeTab, setActiveTab] = useState('todos')
-  var { data: indexData } = useDranIndex()
+  var projectQuery = useDranPages('project')
+  var goalQuery = useDranPages('goal')
+  var planQuery = useDranPages('plan')
   var { data: todoData } = useDranTodos()
 
   // Calculate counts per tab
   var tabCounts = { projects: 0, goals: 0, plans: 0, todos: 0 }
-  if (indexData && indexData.data) {
-    indexData.data.forEach(function (p) {
-      if (p.archived) return
-      if (p.type === 'project') {
-        var st = p.status
-        if (st !== 'done' && st !== 'archived') tabCounts.projects++
-      } else if (p.type === 'goal') {
-        if (p.progress !== 100 && p.progress !== '100') tabCounts.goals++
-      } else if (p.type === 'plan') {
-        var pst = p.status
-        if (pst !== 'done' && pst !== 'archived') tabCounts.plans++
-      }
-    })
+  if (projectQuery.data && projectQuery.data.data) {
+    tabCounts.projects = projectQuery.data.data.filter(function (p) {
+      if (p.archived) return false
+      var st = (p.meta || {}).status
+      return st !== 'done' && st !== 'archived'
+    }).length
+  }
+  if (goalQuery.data && goalQuery.data.data) {
+    tabCounts.goals = goalQuery.data.data.filter(function (g) {
+      if (g.archived) return false
+      return progressToPercent((g.meta || {}).progress) !== 100
+    }).length
+  }
+  if (planQuery.data && planQuery.data.data) {
+    tabCounts.plans = planQuery.data.data.filter(function (p) {
+      if (p.archived) return false
+      var st = (p.meta || {}).status
+      return st !== 'done' && st !== 'archived'
+    }).length
   }
   if (todoData && todoData.data) {
     tabCounts.todos = todoData.data.filter(function (t) {
@@ -258,16 +328,17 @@ function PlansTab() { return jsx(ListTab, { type: 'plan', emptyMsg: 'No plans' }
 function ListTab(_ref) {
   var type = _ref.type
   var emptyMsg = _ref.emptyMsg
-  var { data, isLoading, error } = useDranIndex()
+  var query = useDranPages(type)
+  var { data, isLoading, error } = query
   var items = data && data.data ? data.data.filter(function (p) {
-    if (p.type !== type) return false
     if (p.archived) return false
+    var meta = p.meta || {}
     if (type === 'project' || type === 'plan') {
-      var st = p.status
+      var st = meta.status
       return st !== 'done' && st !== 'archived'
     }
     if (type === 'goal') {
-      return p.progress !== 100 && p.progress !== '100'
+      return progressToPercent(meta.progress) !== 100
     }
     return true
   }) : []
@@ -281,22 +352,265 @@ function ListTab(_ref) {
     children: jsx('div', {
       className: 'p-3 space-y-1',
       children: items.map(function (item) {
-        return jsxs('button', {
-          className: 'w-full flex items-center justify-between gap-2 rounded-md border border-(--ui-stroke-secondary) px-3 py-2 hover:bg-(--chrome-action-hover) transition-colors text-left',
-          onClick: function () {
-            haptic('tap')
-            openInDevBrowser(dranPageUrl(type, item.slug))
-          },
-          children: [
-            jsxs('div', { className: 'flex items-center gap-2 min-w-0', children: [
-              jsx('span', { className: 'size-1.5 rounded-full shrink-0 bg-(--ui-accent)' }),
-              jsx('span', { className: 'truncate text-sm font-medium', children: item.title })
-            ]}),
-            jsx('span', { className: 'text-(--ui-text-quaternary) shrink-0 text-xs', children: '›' })
-          ]
-        }, item.slug)
+        return jsx(ListItem, {
+          key: item.slug,
+          item: item,
+          type: type,
+          query: query,
+        })
       })
     })
+  })
+}
+
+// ── List item with status/archive/progress controls ────────────────────
+
+function ListItem(_ref) {
+  var item = _ref.item
+  var type = _ref.type
+  var query = _ref.query
+  var meta = item.meta || {}
+
+  return jsxs('div', {
+    className: 'flex items-center justify-between gap-2 rounded-md border border-(--ui-stroke-secondary) px-3 py-2 hover:bg-(--chrome-action-hover) transition-colors',
+    children: [
+      jsxs('button', {
+        className: 'flex items-center gap-2 min-w-0 flex-1 text-left',
+        onClick: function () {
+          haptic('tap')
+          openInDevBrowser(dranPageUrl(type, item.slug))
+        },
+        children: [
+          jsx('span', { className: 'size-1.5 rounded-full shrink-0 bg-(--ui-accent)' }),
+          jsx('span', { className: 'truncate text-sm font-medium', children: item.title })
+        ]
+      }),
+      jsxs('div', { className: 'flex items-center gap-1.5 shrink-0', children: [
+        // Status / progress controls depend on type
+        type === 'project' ? jsx(StatusDropdown, {
+          slug: item.slug,
+          currentStatus: meta.status || 'draft',
+          statuses: PROJECT_STATUSES,
+          query: query,
+        }) : null,
+        type === 'plan' ? jsx(StatusDropdown, {
+          slug: item.slug,
+          currentStatus: meta.status || 'draft',
+          statuses: PLAN_STATUSES,
+          query: query,
+        }) : null,
+        type === 'goal' ? jsx(ProgressControl, {
+          slug: item.slug,
+          currentProgress: meta.progress,
+          query: query,
+        }) : null,
+        // Archive button — always available
+        jsx(ArchiveButton, {
+          slug: item.slug,
+          query: query,
+        })
+      ]})
+    ]
+  })
+}
+
+// ── Status dropdown (projects & plans) ───────────────────────────────────
+
+function StatusDropdown(_ref) {
+  var slug = _ref.slug
+  var currentStatus = _ref.currentStatus
+  var statuses = _ref.statuses
+  var query = _ref.query
+
+  var [open, setOpen] = useState(false)
+  var [updating, setUpdating] = useState(false)
+  var ref = useRef(null)
+
+  useEffect(function () {
+    if (!open) return
+    function handler(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return function () { document.removeEventListener('mousedown', handler) }
+  }, [open])
+
+  function changeStatus(newStatus) {
+    setOpen(false)
+    if (newStatus === currentStatus) return
+    setUpdating(true)
+    updatePageMeta(slug, 'status', newStatus)
+      .then(function () {
+        if (query.refetch) query.refetch()
+      })
+      .catch(function (err) {
+        console.error('Failed to update status:', err)
+      })
+      .finally(function () {
+        setUpdating(false)
+      })
+  }
+
+  return jsxs('div', { ref: ref, className: 'relative', children: [
+    jsx('button', {
+      className: cn(
+        'text-[0.625rem] px-1.5 py-0.5 rounded transition-colors',
+        'border border-(--ui-stroke-secondary) hover:bg-(--chrome-action-hover)',
+        statusColor(currentStatus),
+        updating && 'opacity-50'
+      ),
+      onClick: function (e) {
+        e.stopPropagation()
+        setOpen(!open)
+      },
+      children: updating ? '…' : currentStatus
+    }),
+    open ? jsxs('div', {
+      className: 'absolute top-full right-0 mt-1 z-50 rounded-md border border-(--ui-stroke-secondary)',
+      style: { backgroundColor: 'var(--ui-popover-background, var(--ui-chat-bubble-background))' },
+      children: statuses.map(function (st) {
+        return jsx('button', {
+          className: cn(
+            'block w-full text-left px-2 py-1 text-[0.625rem] hover:bg-(--chrome-action-hover) transition-colors',
+            'first:rounded-t-md last:rounded-b-md',
+            st === currentStatus ? 'text-(--ui-accent) font-medium' : statusColor(st)
+          ),
+          onClick: function (e) {
+            e.stopPropagation()
+            changeStatus(st)
+          },
+          children: st
+        }, st)
+      })
+    }) : null
+  ]})
+}
+
+// ── Progress control (goals) ────────────────────────────────────────────
+
+function ProgressControl(_ref) {
+  var slug = _ref.slug
+  var currentProgress = _ref.currentProgress
+  var query = _ref.query
+
+  var pct = progressToPercent(currentProgress)
+  var [editing, setEditing] = useState(false)
+  var [value, setValue] = useState(pct)
+  var [updating, setUpdating] = useState(false)
+  var ref = useRef(null)
+
+  useEffect(function () {
+    if (!editing) return
+    function handler(e) {
+      if (ref.current && !ref.current.contains(e.target)) setEditing(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return function () { document.removeEventListener('mousedown', handler) }
+  }, [editing])
+
+  function save(newPct) {
+    var clamped = Math.max(0, Math.min(100, newPct))
+    if (clamped === pct) {
+      setEditing(false)
+      return
+    }
+    setUpdating(true)
+    updatePageMeta(slug, 'progress', percentToProgress(clamped))
+      .then(function () {
+        if (query.refetch) query.refetch()
+      })
+      .catch(function (err) {
+        console.error('Failed to update progress:', err)
+      })
+      .finally(function () {
+        setUpdating(false)
+        setEditing(false)
+      })
+  }
+
+  return jsxs('div', { ref: ref, className: 'relative', children: [
+    jsx('button', {
+      className: cn(
+        'text-[0.625rem] px-1.5 py-0.5 rounded transition-colors',
+        'border border-(--ui-stroke-secondary) hover:bg-(--chrome-action-hover)',
+        'text-(--ui-text-tertiary) tabular-nums',
+        updating && 'opacity-50'
+      ),
+      onClick: function (e) {
+        e.stopPropagation()
+        setValue(pct)
+        setEditing(!editing)
+      },
+      children: updating ? '…' : (pct + '%')
+    }),
+    editing ? jsxs('div', {
+      className: 'absolute top-full right-0 mt-1 z-50 rounded-md border border-(--ui-stroke-secondary) p-2',
+      style: { backgroundColor: 'var(--ui-popover-background, var(--ui-chat-bubble-background))' },
+      children: [
+        jsx('input', {
+          type: 'range',
+          min: 0,
+          max: 100,
+          step: 5,
+          value: value,
+          onChange: function (e) { setValue(Number(e.target.value)) },
+          onMouseUp: function () { save(value) },
+          onTouchEnd: function () { save(value) },
+          className: 'w-28 accent-(--ui-accent)',
+          style: { accentColor: 'var(--ui-accent)' }
+        }),
+        jsxs('div', {
+          className: 'flex items-center justify-between mt-1.5 gap-2',
+          children: [
+            jsxs('span', { className: 'text-[0.625rem] text-(--ui-text-tertiary) tabular-nums', children: [value, '%'] }),
+            jsx('button', {
+              className: 'text-[0.625rem] px-1.5 py-0.5 rounded bg-(--ui-accent) text-white hover:opacity-80 transition-opacity',
+              onClick: function (e) {
+                e.stopPropagation()
+                save(value)
+              },
+              children: 'OK'
+            })
+          ]
+        })
+      ]
+    }) : null
+  ]})
+}
+
+// ── Archive button ───────────────────────────────────────────────────────
+
+function ArchiveButton(_ref) {
+  var slug = _ref.slug
+  var query = _ref.query
+
+  var [updating, setUpdating] = useState(false)
+
+  function handleArchive(e) {
+    e.stopPropagation()
+    setUpdating(true)
+    archivePage(slug)
+      .then(function () {
+        if (query.refetch) query.refetch()
+      })
+      .catch(function (err) {
+        console.error('Failed to archive:', err)
+      })
+      .finally(function () {
+        setUpdating(false)
+      })
+  }
+
+  return jsx('button', {
+    className: cn(
+      'text-[0.625rem] px-1.5 py-0.5 rounded transition-colors',
+      'border border-(--ui-stroke-secondary) hover:bg-(--chrome-action-hover)',
+      'text-(--ui-text-quaternary)',
+      updating && 'opacity-50'
+    ),
+    onClick: handleArchive,
+    title: 'Archive',
+    children: updating ? '…' : '⊠'
   })
 }
 
@@ -346,11 +660,14 @@ function TodosTab() {
                 jsx('span', { className: 'text-[0.625rem] tabular-nums text-(--ui-text-quaternary)', children: '(' + String(colTodos.length) + ')' })
               ]
             }),
-            jsx('div', {
-              className: 'flex flex-col gap-2 flex-1',
-              children: colTodos.length === 0
-                ? [jsx('div', { key: 'empty', className: 'text-[0.625rem] text-(--ui-text-quaternary) text-center py-4', children: '—' })]
-                : colTodos.map(function (t) { return jsx(TodoCard, { key: t.id, todo: t }) })
+            jsx(ScrollArea, {
+              className: 'flex-1',
+              children: jsx('div', {
+                className: 'flex flex-col gap-2',
+                children: colTodos.length === 0
+                  ? [jsx('div', { key: 'empty', className: 'text-[0.625rem] text-(--ui-text-quaternary) text-center py-4', children: '—' })]
+                  : colTodos.map(function (t) { return jsx(TodoCard, { key: t.id, todo: t }) })
+              })
             })
           ]
         }, col.key)
