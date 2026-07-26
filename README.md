@@ -39,6 +39,21 @@ hermes-dran/
 └── LICENSE
 ```
 
+## Quickstart (for agents)
+
+> Run these steps as-is. Everything is relative to the clone location (`$REPO`) and `~/.hermes/` — no machine-specific paths.
+
+```bash
+# 1. Clone
+git clone https://github.com/alvarolizama/hermes-dran.git
+cd hermes-dran && export REPO="$PWD"
+
+# 2. Desktop plugin (chip + modal UI)
+ln -sfn "$REPO/desktop" ~/.hermes/desktop-plugins/hermes-dran
+```
+
+**Dependencies:** a running [Dran](https://github.com/alvarolizama/dran) instance. After installing, configure the connection (URL + API token + context) — see [Configure your Dran connection](#configure-your-dran-connection) below. Restart the Hermes desktop app (or `/reset`) after installing.
+
 ## Installation
 
 ### Option A: Symlinks (recommended for development)
