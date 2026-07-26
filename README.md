@@ -29,21 +29,42 @@ The plugin talks directly to your Dran instance's REST API (`/api/index` and `/a
 - A running [Dran](https://github.com/alvarolizama/dran) instance (self-hosted)
 - The [Hermes Dev Browser](https://github.com/alvarolizama/hermes-dev-browser) plugin installed (for click-to-open functionality)
 
-## Installation
+## Repo Structure
 
-### 1. Install the plugin file
-
-```bash
-# Create the desktop plugins directory if it doesn't exist
-mkdir -p ~/.hermes/desktop-plugins/hermes-dran
-
-# Copy the plugin
-cp plugin.js ~/.hermes/desktop-plugins/hermes-dran/plugin.js
+```
+hermes-dran/
+├── desktop/
+│   └── plugin.js              # Status bar chip + modal with tabs
+├── README.md
+└── LICENSE
 ```
 
-### 2. Configure your Dran connection
+## Installation
 
-Edit the top of `plugin.js` and set your Dran instance URL, API token, and context:
+### Option A: Symlinks (recommended for development)
+
+Clone the repo and symlink the `desktop/` directory into Hermes:
+
+```bash
+git clone https://github.com/alvarolizama/hermes-dran.git ~/Workspace/Repos/hermes-dran
+
+# Desktop plugin → desktop/
+ln -s ~/Workspace/Repos/hermes-dran/desktop ~/.hermes/desktop-plugins/hermes-dran
+```
+
+Edit in `~/Workspace/Repos/hermes-dran/`, git push from there, and Hermes reads changes in real-time via the symlink. No copy scripts needed.
+
+### Option B: Manual install (for non-dev setups)
+
+```bash
+mkdir -p ~/.hermes/desktop-plugins/hermes-dran
+curl -o ~/.hermes/desktop-plugins/hermes-dran/plugin.js \
+  https://raw.githubusercontent.com/alvarolizama/hermes-dran/main/desktop/plugin.js
+```
+
+### Configure your Dran connection
+
+Edit the top of `desktop/plugin.js` and set your Dran instance URL, API token, and context:
 
 ```js
 var DRAN_URL = 'http://your-dran-instance:4000'
@@ -51,7 +72,7 @@ var DRAN_TOKEN = 'your-api-token-here'
 var DRAN_CONTEXT = 'personal'
 ```
 
-### 3. Restart Hermes
+### Restart Hermes
 
 Restart the Hermes desktop app. The "Dran" chip will appear in the status bar.
 
