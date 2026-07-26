@@ -205,7 +205,7 @@ function DranChip() {
             ]}),
             jsxs('span', { className: 'inline-flex items-center gap-1', children: [
               'Goals',
-              jsx('span', { style: dotStyle(counts.goal > 0) }),
+              jsx('span', { style: dotStyle(goalCount > 0) }),
               String(goalsDisplay)
             ]})
           ]})
