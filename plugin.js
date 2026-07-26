@@ -113,8 +113,15 @@ function DranChip() {
     }).length
   }
 
-  var total = isLoading ? '…' : error ? '!' : (counts.project + counts.goal + counts.plan + activeTodos)
-  var hasActive = activeTodos > 0
+  var todosDisplay = todoData.isLoading ? '…' : todoData.error ? '!' : activeTodos
+  var goalsDisplay = isLoading ? '…' : error ? '!' : counts.goal
+
+  function dotStyle(active) {
+    return {
+      width: 6, height: 6, borderRadius: '50%', display: 'inline-block', flexShrink: 0,
+      backgroundColor: active ? '#22c55e' : 'var(--ui-text-quaternary)'
+    }
+  }
 
   return jsxs(Fragment, {
     children: [
@@ -122,19 +129,23 @@ function DranChip() {
         label: 'Dran Brain',
         children: jsx('button', {
           className: cn(
-            'inline-flex h-full items-center gap-1.5 px-1.5 text-[0.6875rem]',
+            'inline-flex h-full items-center gap-2.5 px-1.5 text-[0.6875rem]',
             'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground',
             'tabular-nums'
           ),
           type: 'button',
           onClick: function () { $modalOpen.set(true) },
-          children: jsxs('span', { className: 'inline-flex items-center gap-1.5', children: [
-            'Dran',
-            jsx('span', { style: {
-              width: 6, height: 6, borderRadius: '50%', display: 'inline-block', flexShrink: 0,
-              backgroundColor: hasActive ? '#22c55e' : (typeof total === 'number' && total > 0 ? 'var(--ui-accent)' : 'var(--ui-text-quaternary)')
-            }}),
-            String(total)
+          children: jsxs('span', { className: 'inline-flex items-center gap-2.5', children: [
+            jsxs('span', { className: 'inline-flex items-center gap-1', children: [
+              'Todos',
+              jsx('span', { style: dotStyle(activeTodos > 0) }),
+              String(todosDisplay)
+            ]}),
+            jsxs('span', { className: 'inline-flex items-center gap-1', children: [
+              'Goals',
+              jsx('span', { style: dotStyle(counts.goal > 0) }),
+              String(goalsDisplay)
+            ]})
           ]})
         })
       }),
@@ -146,10 +157,10 @@ function DranChip() {
 // ── Main modal with tabs ────────────────────────────────────────────────
 
 var TABS = [
-  { key: 'projects', label: 'Projects' },
-  { key: 'goals', label: 'Goals' },
-  { key: 'plans', label: 'Plans' },
   { key: 'todos', label: 'Todos' },
+  { key: 'plans', label: 'Plans' },
+  { key: 'goals', label: 'Goals' },
+  { key: 'projects', label: 'Projects' },
 ]
 
 function DranModal() {
@@ -162,7 +173,7 @@ function DranModal() {
     onOpenChange: function (v) { $modalOpen.set(v) },
     children: jsx(DialogContent, {
       fitContent: true,
-      showCloseButton: false,
+      showCloseButton: true,
       className: 'p-0',
       children: jsx(DranModalContent, {})
     })
@@ -170,7 +181,7 @@ function DranModal() {
 }
 
 function DranModalContent() {
-  var [activeTab, setActiveTab] = useState('projects')
+  var [activeTab, setActiveTab] = useState('todos')
   var { data: indexData } = useDranIndex()
   var { data: todoData } = useDranTodos()
 
