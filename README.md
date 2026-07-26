@@ -12,16 +12,16 @@ The plugin talks directly to your Dran instance's REST API (`/api/index` and `/a
 
 ### Features
 
-- **🎯 Single status bar chip** — plain text "Dran" label with a colored status dot:
-  - 🟢 Green = active todos exist
-  - 🔵 Blue/accent = has items (projects/goals/plans) but no active todos
-  - ⚪ Gray = empty
-- **📊 Count badge** — total active items shown next to the chip
-- **🗂️ 4-tab modal** — Projects, Goals, Plans, Todos — each with a count badge
-- **📋 Kanban board** — Todos tab shows 5 columns (Backlog → This Week → Today → In Progress → Done)
-- **🔗 Click-to-open** — clicking any item opens the Dran page in a new Dev Browser tab via `window.dispatchEvent('hermes:dev-browser:new-tab')`
+- **🎯 Single status bar chip** — three segments with live counts:
+  - **Todos** 🟢 N — active todos (excludes done, cancelled, archived)
+  - **Plans** 🟢 N — active plans (excludes done, archived)
+  - **Goals** 🟢 N — all goals (excludes archived)
+- **🗂️ 4-tab modal** — Todos, Plans, Goals, Projects — each with a count badge (excludes archived only)
+- **📋 Kanban board** — Todos tab shows 5 columns (Backlog → This Week → Today → In Progress → Done), flexible width
+- **⚙️ Inline controls** — change status (projects/plans), health (goals), and progress (goals) directly from the list
+- **📦 Archive button** — archive any item directly from the list
+- **🔗 Click-to-open** — clicking any item opens the Dran page in a new Dev Browser tab
 - **🔄 Auto-refresh** — polls Dran API every 30 seconds
-- **🚫 Smart filtering** — hides archived items, cancelled todos, done projects/plans, and goals at 100% progress
 - **🎨 Theme-aware** — uses the app's CSS variables (`var(--ui-*)`), adapts to any theme automatically
 
 ### Requirements
@@ -106,10 +106,14 @@ All configuration is at the top of `plugin.js`:
 
 The plugin registers a single status bar item (`statusBar.right`, order 130) that renders the Dran chip. On click, it opens a `Dialog` modal with tabbed content:
 
-1. **Projects tab** — lists active (non-done, non-archived) projects from `/api/index`
-2. **Goals tab** — lists active (non-100% progress) goals from `/api/index`
-3. **Plans tab** — lists active (non-done, non-archived) plans from `/api/index`
-4. **Todos tab** — renders a 5-column Kanban board from `/api/todos`, grouped by `meta.kanban_status`
+1. **Todos tab** — renders a 5-column Kanban board from `/api/todos`, grouped by `meta.kanban_status`. Excludes archived and cancelled.
+2. **Plans tab** — lists all non-archived plans from `/api/pages?type=plan`. Inline status dropdown (draft/active/done) + archive button.
+3. **Goals tab** — lists all non-archived goals from `/api/pages?type=goal`. Inline progress slider + health indicator + archive button.
+4. **Projects tab** — lists all non-archived projects from `/api/pages?type=project`. Inline status dropdown (draft/active/on_hold/done) + archive button.
+
+**Chip counts**: Todos excludes done/cancelled/archived. Plans excludes done/archived. Goals excludes archived only.
+
+**Tab counts**: All tabs show non-archived items only (done items are visible in the list).
 
 Clicking any item dispatches a `hermes:dev-browser:new-tab` `CustomEvent` on `window`, which the Dev Browser plugin listens for and opens the Dran page URL in a new tab.
 

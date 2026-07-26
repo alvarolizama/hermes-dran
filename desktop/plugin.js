@@ -155,19 +155,27 @@ function useDranPages(pageType) {
 function DranChip() {
   var open = useValue($modalOpen)
   var goalQuery = useDranPages('goal')
+  var planQuery = useDranPages('plan')
 
   var goalCount = 0
   if (goalQuery.data && goalQuery.data.data) {
     goalCount = goalQuery.data.data.filter(function (g) {
-      if (g.archived) return false
-      var meta = g.meta || {}
-      return progressToPercent(meta.progress) !== 100
+      return !g.archived
+    }).length
+  }
+
+  var planCount = 0
+  if (planQuery.data && planQuery.data.data) {
+    planCount = planQuery.data.data.filter(function (p) {
+      if (p.archived) return false
+      var st = (p.meta || {}).status
+      return st !== 'done'
     }).length
   }
 
   var activeTodos = 0
   var todoData = useDranTodos()
-  if (todoData.data && todoData.data.data) {
+  if (todoData.data && todoData.data) {
     activeTodos = todoData.data.data.filter(function (t) {
       if (t.archived) return false
       var ks = t.meta && t.meta.kanban_status
@@ -176,6 +184,7 @@ function DranChip() {
   }
 
   var todosDisplay = todoData.isLoading ? '…' : todoData.error ? '!' : activeTodos
+  var plansDisplay = planQuery.isLoading ? '…' : planQuery.error ? '!' : planCount
   var goalsDisplay = goalQuery.isLoading ? '…' : goalQuery.error ? '!' : goalCount
 
   function dotStyle(active) {
@@ -202,6 +211,11 @@ function DranChip() {
               'Todos',
               jsx('span', { style: dotStyle(activeTodos > 0) }),
               String(todosDisplay)
+            ]}),
+            jsxs('span', { className: 'inline-flex items-center gap-1', children: [
+              'Plans',
+              jsx('span', { style: dotStyle(planCount > 0) }),
+              String(plansDisplay)
             ]}),
             jsxs('span', { className: 'inline-flex items-center gap-1', children: [
               'Goals',
@@ -253,22 +267,17 @@ function DranModalContent() {
   var tabCounts = { projects: 0, goals: 0, plans: 0, todos: 0 }
   if (projectQuery.data && projectQuery.data.data) {
     tabCounts.projects = projectQuery.data.data.filter(function (p) {
-      if (p.archived) return false
-      var st = (p.meta || {}).status
-      return st !== 'done' && st !== 'archived'
+      return !p.archived
     }).length
   }
   if (goalQuery.data && goalQuery.data.data) {
     tabCounts.goals = goalQuery.data.data.filter(function (g) {
-      if (g.archived) return false
-      return progressToPercent((g.meta || {}).progress) !== 100
+      return !g.archived
     }).length
   }
   if (planQuery.data && planQuery.data.data) {
     tabCounts.plans = planQuery.data.data.filter(function (p) {
-      if (p.archived) return false
-      var st = (p.meta || {}).status
-      return st !== 'done' && st !== 'archived'
+      return !p.archived
     }).length
   }
   if (todoData && todoData.data) {
@@ -332,14 +341,6 @@ function ListTab(_ref) {
   var { data, isLoading, error } = query
   var items = data && data.data ? data.data.filter(function (p) {
     if (p.archived) return false
-    var meta = p.meta || {}
-    if (type === 'project' || type === 'plan') {
-      var st = meta.status
-      return st !== 'done' && st !== 'archived'
-    }
-    if (type === 'goal') {
-      return progressToPercent(meta.progress) !== 100
-    }
     return true
   }) : []
 
@@ -644,24 +645,24 @@ function TodosTab() {
   if (error) return jsx('div', { className: 'flex-1 flex items-center justify-center p-4', children: jsx(ErrorState, { message: 'Failed to load todos' }) })
   if (todos.length === 0) return jsx('div', { className: 'flex-1 flex items-center justify-center', children: jsx(EmptyState, { title: 'No todos', description: 'No todos in Dran' }) })
 
-  return jsx(ScrollArea, {
-    className: 'h-full',
+  return jsx('div', {
+    className: 'h-full overflow-hidden',
     children: jsx('div', {
-      className: 'flex gap-3 p-3 min-w-max',
+      className: 'flex gap-3 p-3 h-full',
       children: KANBAN_COLUMNS.map(function (col) {
         var colTodos = grouped[col.key] || []
         return jsxs('div', {
-          className: 'flex w-64 flex-col gap-2 shrink-0',
+          className: 'flex flex-1 min-w-0 flex-col gap-2 shrink-0 h-full',
           children: [
             jsxs('div', {
-              className: 'flex items-center justify-between px-2 py-1',
+              className: 'flex items-center justify-between px-2 py-1 shrink-0',
               children: [
                 jsx('span', { className: 'text-xs font-medium text-(--ui-text-secondary)', children: col.label }),
                 jsx('span', { className: 'text-[0.625rem] tabular-nums text-(--ui-text-quaternary)', children: '(' + String(colTodos.length) + ')' })
               ]
             }),
             jsx(ScrollArea, {
-              className: 'flex-1',
+              className: 'flex-1 min-h-0',
               children: jsx('div', {
                 className: 'flex flex-col gap-2',
                 children: colTodos.length === 0
