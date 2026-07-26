@@ -328,6 +328,40 @@ function DranModalContent() {
   })
 }
 
+// ── Group config per type ──────────────────────────────────────────────
+
+var PROJECT_GROUPS = [
+  { key: 'active',  label: 'Active',  color: '#22c55e', order: 1 },
+  { key: 'draft',   label: 'Draft',   color: 'var(--ui-text-quaternary)', order: 2 },
+  { key: 'on_hold', label: 'On Hold', color: '#eab308', order: 3 },
+  { key: 'done',    label: 'Done',    color: '#4ade80', order: 4 },
+]
+
+var PLAN_GROUPS = [
+  { key: 'active', label: 'Active', color: '#22c55e', order: 1 },
+  { key: 'draft',  label: 'Draft',  color: 'var(--ui-text-quaternary)', order: 2 },
+  { key: 'done',   label: 'Done',   color: '#4ade80', order: 3 },
+]
+
+var GOAL_GROUPS = [
+  { key: 'red',    label: 'At Risk',    color: '#ef4444', order: 1 },
+  { key: 'yellow', label: 'Caution',   color: '#eab308', order: 2 },
+  { key: 'green',  label: 'Healthy',   color: '#22c55e', order: 3 },
+]
+
+function groupConfig(type) {
+  if (type === 'project') return { groups: PROJECT_GROUPS, field: 'status' }
+  if (type === 'plan') return { groups: PLAN_GROUPS, field: 'status' }
+  if (type === 'goal') return { groups: GOAL_GROUPS, field: 'health' }
+  return null
+}
+
+function groupKey(item, type) {
+  var meta = item.meta || {}
+  if (type === 'goal') return meta.health || 'green'
+  return meta.status || 'draft'
+}
+
 // ── Projects / Goals / Plans tabs ───────────────────────────────────────
 
 function ProjectsTab() { return jsx(ListTab, { type: 'project', emptyMsg: 'No projects' }) }
@@ -348,17 +382,58 @@ function ListTab(_ref) {
   if (error) return jsx('div', { className: 'flex-1 flex items-center justify-center p-4', children: jsx(ErrorState, { message: 'Failed to load' }) })
   if (items.length === 0) return jsx('div', { className: 'flex-1 flex items-center justify-center', children: jsx(EmptyState, { title: 'Empty', description: emptyMsg }) })
 
+  var cfg = groupConfig(type)
+
+  // If no group config (shouldn't happen for project/plan/goal), flat list
+  if (!cfg) {
+    return jsx(ScrollArea, {
+      className: 'h-full',
+      children: jsx('div', {
+        className: 'p-3 space-y-1',
+        children: items.map(function (item) {
+          return jsx(ListItem, { key: item.slug, item: item, type: type, query: query })
+        })
+      })
+    })
+  }
+
+  // Group items by status/health
+  var grouped = {}
+  items.forEach(function (item) {
+    var gk = groupKey(item, type)
+    if (!grouped[gk]) grouped[gk] = []
+    grouped[gk].push(item)
+  })
+
+  // Sort groups by order, skip empty
+  var sortedGroups = cfg.groups
+    .filter(function (g) { return grouped[g.key] && grouped[g.key].length > 0 })
+    .sort(function (a, b) { return a.order - b.order })
+
   return jsx(ScrollArea, {
     className: 'h-full',
     children: jsx('div', {
-      className: 'p-3 space-y-1',
-      children: items.map(function (item) {
-        return jsx(ListItem, {
-          key: item.slug,
-          item: item,
-          type: type,
-          query: query,
-        })
+      className: 'p-3 space-y-3',
+      children: sortedGroups.map(function (g) {
+        var groupItems = grouped[g.key] || []
+        return jsxs('div', {
+          children: [
+            jsxs('div', {
+              className: 'flex items-center gap-1.5 px-1 py-1 shrink-0',
+              children: [
+                jsx('span', { style: { width: 6, height: 6, borderRadius: '50%', display: 'inline-block', backgroundColor: g.color } }),
+                jsx('span', { className: 'text-xs font-medium text-(--ui-text-secondary)', children: g.label }),
+                jsx('span', { className: 'text-[0.625rem] tabular-nums text-(--ui-text-quaternary)', children: '(' + String(groupItems.length) + ')' })
+              ]
+            }),
+            jsx('div', {
+              className: 'space-y-1',
+              children: groupItems.map(function (item) {
+                return jsx(ListItem, { key: item.slug, item: item, type: type, query: query })
+              })
+            })
+          ]
+        }, g.key)
       })
     })
   })
